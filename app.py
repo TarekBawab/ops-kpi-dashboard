@@ -1,11 +1,50 @@
 import pandas as pd
 import streamlit as st
 
-# ---- Page config ----
+# ================================
+# Page setup + Global CSS (fonts)
+# ================================
 st.set_page_config(page_title="Ops KPI Dashboard", page_icon="📊", layout="wide")
+
+# Force a consistent font and simple cards for metrics/stat boxes
+st.markdown(
+    """
+    <style>
+      html, body, [class*="block-container"] * {
+        font-family: Arial, sans-serif !important;
+      }
+      .metric-box {
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid #e5e7eb;
+        background: #f7f8fa;
+        margin-bottom: 8px;
+      }
+      .metric-label {
+        font-weight: 600;
+        color: #374151;
+        margin-bottom: 2px;
+        font-size: 13px;
+      }
+      .metric-value {
+        font-weight: 700;
+        font-size: 22px;
+        color: #111827;
+        line-height: 1.2;
+      }
+      .good { color: #0a7d33; }   /* green */
+      .bad  { color: #b00020; }   /* red   */
+      .muted { color: #6b7280; font-size: 13px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("Ops KPI Dashboard — Demo")
 
-# ---- Helpers ----
+# ================================
+# Helpers
+# ================================
 @st.cache_data
 def load_csv(file_like):
     """Read CSV and normalize columns. Expect columns: date,sales."""
@@ -17,22 +56,34 @@ def load_csv(file_like):
     df = df.sort_values("date")
     return df[["date", "sales"]]
 
-# ---- Sidebar: data source ----
+def metric_card(label: str, value_html: str, extra_html: str = ""):
+    """Render a consistent metric card with matching fonts."""
+    st.markdown(
+        f"""
+        <div class="metric-box">
+          <div class="metric-label">{label}</div>
+          <div class="metric-value">{value_html}</div>
+          {f'<div class="muted">{extra_html}</div>' if extra_html else ''}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# ================================
+# Sidebar — Data source & Templates
+# ================================
 st.sidebar.header("Data")
 uploaded = st.sidebar.file_uploader("Upload CSV (columns: date,sales)", type=["csv"])
 
-# ---- Sidebar: templates to download ----
 st.sidebar.header("Templates")
 with st.sidebar.expander("Download a CSV template"):
     template_kind = st.radio(
-        "Template type",
-        ["Daily (last 30 days)", "Monthly (last 12 months)"],
-        index=0
+        "Template type", ["Daily (last 30 days)", "Monthly (last 12 months)"], index=0
     )
     include_examples = st.checkbox(
         "Include example values",
         value=True,
-        help="If unchecked, 'sales' will be blank so you can fill it."
+        help="If unchecked, 'sales' will be blank so you can fill it.",
     )
 
     # Build template dataframe
@@ -55,33 +106,44 @@ with st.sidebar.expander("Download a CSV template"):
         data=df_tmpl.to_csv(index=False).encode("utf-8"),
         file_name="daily_template.csv" if template_kind.startswith("Daily") else "monthly_template.csv",
         mime="text/csv",
-        help="Download, edit the Sales column, then upload it back above."
+        help="Download, edit the Sales column, then upload it back above.",
     )
 
-# ---- Sidebar: view options ----
+# Sidebar — View
 view = st.sidebar.radio("View", ["Daily", "Monthly"], horizontal=True, index=0)
 
-# ---- Load data (uploaded or sample) ----
+# ================================
+# Load data (uploaded or sample)
+# ================================
 try:
     if uploaded:
         sales = load_csv(uploaded)
     else:
-        # Fallback to bundled sample
         sales = load_csv("data/sample_daily_sales.csv")
 except Exception as e:
     st.error(f"Problem loading CSV: {e}")
     st.stop()
 
-# ✅ Success message + quick summary
+# Success summary (consistent fonts)
 st.success(
-    f"Loaded {len(sales)} rows "
-    f"from {sales['date'].min().date()} to {sales['date'].max().date()}"
+    f"Loaded {len(sales)} rows from {sales['date'].min().date()} to {sales['date'].max().date()}"
 )
+
 total = int(sales["sales"].sum())
 avg = int(sales["sales"].mean())
-st.write(f"**Total sales:** ${total:,} · **Average:** ${avg:,}")
 
-# ---- Apply view (daily / monthly) ----
+# Top metric row (consistent cards)
+col1, col2 = st.columns([1, 1])
+with col1:
+    metric_card("Total Sales", f"${total:,}")
+with col2:
+    # "Most Recent" = last row of daily sales; for monthly view users still see daily most recent here
+    latest_val = int(sales["sales"].iloc[-1])
+    metric_card("Sales (Most Recent)", f"${latest_val:,}")
+
+# ================================
+# Apply view (daily / monthly)
+# ================================
 if view == "Monthly":
     sales_view = (
         sales.set_index("date")
@@ -92,28 +154,34 @@ if view == "Monthly":
 else:
     sales_view = sales.copy()
 
-# ---- KPIs ----
-latest_val = int(sales["sales"].iloc[-1])
-st.metric("Sales (Most Recent)", f"${latest_val:,}")
-
-# ---- Chart ----
+# ================================
+# Chart + export
+# ================================
 st.line_chart(sales_view.set_index("date")["sales"], use_container_width=True)
 
-# ---- Download current view ----
 csv_view = sales_view.to_csv(index=False).encode("utf-8")
 st.download_button(
     "⬇️ Download current view (CSV)",
     data=csv_view,
     file_name="sales_view.csv",
-    mime="text/csv"
+    mime="text/csv",
 )
 
-# ---- Quick stats: best and worst period in current view ----
-best = sales_view.loc[sales_view["sales"].idxmax()]
-worst = sales_view.loc[sales_view["sales"].idxmin()]
-st.write(
-    f"**Best:** {best['date'].date()} → ${int(best['sales']):,} · "
-    f"**Worst:** {worst['date'].date()} → ${int(worst['sales']):,}"
-)
+# ================================
+# Best / Worst (consistent fonts & colors)
+# ================================
+best_row = sales_view.loc[sales_view["sales"].idxmax()]
+worst_row = sales_view.loc[sales_view["sales"].idxmin()]
+
+best_date = best_row["date"].date()
+best_val = int(best_row["sales"])
+worst_date = worst_row["date"].date()
+worst_val = int(worst_row["sales"])
+
+col3, col4 = st.columns([1, 1])
+with col3:
+    metric_card("Best", f"<span class='good'>{best_date} → ${best_val:,}</span>")
+with col4:
+    metric_card("Worst", f"<span class='bad'>{worst_date} → ${worst_val:,}</span>")
 
 st.caption("Templates: Keep headers exactly `date,sales`. Dates can be daily or 1st of each month.")
